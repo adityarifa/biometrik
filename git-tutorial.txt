@@ -1,0 +1,21 @@
+## Install Git 
+make folder
+cd folder
+git init
+
+## add remote user
+git remote add <nama> <link> exp:
+git remote add origin https://github.com/adityarifa/biometrik.git
+
+## Commit and Push to Git via terminal
+git add .
+git commit -m 'first commit'
+git push origin master
+
+## reset git
+git reset --soft HEAD^
+git reset --hard HEAD^
+
+## Clone git
+git clone http://
+
