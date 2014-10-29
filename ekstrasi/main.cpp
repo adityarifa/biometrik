@@ -9,8 +9,59 @@
 using namespace std;
 using namespace cv;
 
-namespace GuoHall {
-    void thinningIteration(cv::Mat& im, int iter)
+namespace Fingerprint
+{
+    void normalize(Mat& im_src, Mat& im_dst, int block_size, int mean_filter)
+    {
+        double desired_mean = 0, desired_variance = 100;
+
+        im_dst = im_src.clone();
+
+        for (int y = 0; y < im_src.rows; y = y + block_size)
+        {
+            for (int x = 0; x < im_src.cols; x = x + block_size)
+            {
+                double mean = 0, variance = 0;
+                Mat roi = im_dst(Rect(x, y, block_size, block_size));
+
+                for (int i = 0; i < roi.rows; i++)
+                {
+                    for (int j = 0; j < roi.cols; j++)
+                    {
+                        mean = mean + roi.at<uchar>(Point(i, j));
+                    }
+                }
+
+                mean = mean / (roi.rows*roi.cols);
+
+                for (int i = 0; i < roi.rows; i++)
+                {
+                    for (int j = 0; j < roi.cols; j++)
+                    {
+                        variance = variance + pow(roi.at<uchar>(Point(i, j)) - mean, 2);
+                    }
+                }
+                variance = variance / (roi.rows*roi.cols);
+
+                for (int j = 0; j < roi.rows; j++)
+                {
+                    for (int i = 0; i < roi.cols; i++)
+                    {
+                        if (mean < mean_filter)
+                        {
+                            if (roi.at<uchar>(Point(i, j)) > mean) roi.at<uchar>(Point(i, j)) = desired_mean + pow((desired_variance*pow(roi.at<uchar>(Point(i, j)) - mean, 2))/variance, 0.5);
+                            else roi.at<uchar>(Point(i, j)) = desired_mean - pow((desired_variance*pow(roi.at<uchar>(Point(i, j)) - mean, 2))/variance, 0.5);
+
+                            roi.at<uchar>(Point(i, j)) = 255 - roi.at<uchar>(Point(i, j));
+                        }
+                        else roi.at<uchar>(Point(i, j)) = 255;
+                    }
+                }
+            }
+        }
+    }
+
+    void GuoHallIteration(cv::Mat& im, int iter)
     {
         cv::Mat marker = cv::Mat::zeros(im.size(), CV_8UC1);
 
@@ -41,7 +92,7 @@ namespace GuoHall {
 
         im &= ~marker;
     }
-    void thinning(cv::Mat& im)
+    void GuoHall(cv::Mat& im)
     {
         im /= 255;
 
@@ -49,8 +100,8 @@ namespace GuoHall {
         cv::Mat diff;
 
         do {
-            thinningIteration(im, 0);
-            thinningIteration(im, 1);
+            GuoHallIteration(im, 0);
+            GuoHallIteration(im, 1);
             cv::absdiff(im, prev, diff);
             im.copyTo(prev);
         }
@@ -58,56 +109,70 @@ namespace GuoHall {
 
         im *= 255;
     }
-}
 
-namespace ZhangSuen {
-    void thinningIteration(cv::Mat& im, int iter)
+    void thinning(Mat& im_src, Mat& im_dst)
     {
-        cv::Mat marker = cv::Mat::zeros(im.size(), CV_8UC1);
+        im_dst = Mat (im_src.rows, im_src.cols, CV_8UC3, Scalar(255,255,255));
 
-        for (int i = 1; i < im.rows-1; i++)
+        int erosion_size = 1;
+        Mat element = getStructuringElement( MORPH_RECT, Size( 2*erosion_size + 1, 2*erosion_size+1 ),Point( erosion_size, erosion_size ) );
+
+        erode( im_src, im_src, element );
+        imshow("sss", im_src);
+        GuoHall(im_src);
+        for(int i = 0; i < im_src.rows; i++) for (int j = 0; j < im_src.cols; j++) im_src.at<uchar>(i, j) = 255 - im_src.at<uchar>(i, j);
+
+        erode( im_src, im_src, element );
+        GuoHall(im_src);
+
+        for(int i = 0; i < im_src.rows; i++)
         {
-            for (int j = 1; j < im.cols-1; j++)
+            for (int j = 0; j < im_src.cols; j++)
             {
-                uchar p2 = im.at<uchar>(i-1, j);
-                uchar p3 = im.at<uchar>(i-1, j+1);
-                uchar p4 = im.at<uchar>(i, j+1);
-                uchar p5 = im.at<uchar>(i+1, j+1);
-                uchar p6 = im.at<uchar>(i+1, j);
-                uchar p7 = im.at<uchar>(i+1, j-1);
-                uchar p8 = im.at<uchar>(i, j-1);
-                uchar p9 = im.at<uchar>(i-1, j-1);
-
-                int A  = (p2 == 0 && p3 == 1) + (p3 == 0 && p4 == 1) +
-                (p4 == 0 && p5 == 1) + (p5 == 0 && p6 == 1) +
-                (p6 == 0 && p7 == 1) + (p7 == 0 && p8 == 1) +
-                (p8 == 0 && p9 == 1) + (p9 == 0 && p2 == 1);
-                int B  = p2 + p3 + p4 + p5 + p6 + p7 + p8 + p9;
-                int m1 = iter == 0 ? (p2 * p4 * p6) : (p2 * p4 * p8);
-                int m2 = iter == 0 ? (p4 * p6 * p8) : (p2 * p6 * p8);
-
-                if (A == 1 && (B >= 2 && B <= 6) && m1 == 0 && m2 == 0)
-                    marker.at<uchar>(i,j) = 1;
+                if (im_src.at<uchar>(i, j) == 255)
+                {
+                    im_dst.at<Vec3b>(i, j)[0] = 0;
+                    im_dst.at<Vec3b>(i, j)[1] = 0;
+                    im_dst.at<Vec3b>(i, j)[2] = 0;
+                }
+                im_src.at<uchar>(i, j) = 255 - im_src.at<uchar>(i, j);
             }
         }
-        im &= ~marker;
     }
-    void thinning(cv::Mat& im)
+
+    void segmentate(Mat& im_src, Mat& im_dst, int block_size)
     {
-        im /= 255;
+        int left_limit = im_src.cols, right_limit = 0, top_limit = im_src.rows, bottom_limit = 0;
+        for (int i = 0; i < im_src.cols - block_size; i = i + block_size)
+        {
+            for (int j = 0; j < im_src.rows - block_size; j = j + block_size)
+            {
+                double mean_val = 0;
 
-        cv::Mat prev = cv::Mat::zeros(im.size(), CV_8UC1);
-        cv::Mat diff;
+                for (int _i = 0; _i < block_size; _i++) for (int _j = 0; _j < block_size; _j++) mean_val = mean_val + im_src.at<uchar>(Point(i + _i, j + _j));
+                mean_val = mean_val/pow(block_size, 2);
 
-        do {
-            thinningIteration(im, 0);
-            thinningIteration(im, 1);
-            cv::absdiff(im, prev, diff);
-            im.copyTo(prev);
+                double sub_var = 0;
+                for (int _i = 0; _i < block_size; _i++) for (int _j = 0; _j < block_size; _j++) sub_var = sub_var + pow((im_src.at<uchar>(Point(i + _i, j + _j)) - mean_val), 2.0);
+                sub_var = sub_var / pow(block_size, 2.0);
+
+                for (int _i = 0; _i < block_size; _i++)
+                {
+                    for (int _j = 0; _j < block_size; _j++)
+                    {
+                        if (sub_var > 1000)
+                        {
+                            if (i+_i < left_limit) left_limit = i+_i;
+                            if (i+_i > right_limit) right_limit = i+_i;
+                            if (j+_j < top_limit) top_limit = j+_j;
+                            if (j+_j > bottom_limit) bottom_limit = j+_j;
+                        }
+                    }
+                }
+            }
         }
-        while (cv::countNonZero(diff) > 0);
-
-        im *= 255;
+        Rect bound = Rect(left_limit, top_limit, ceil((float)(right_limit-left_limit)/block_size)*block_size,ceil((float)(bottom_limit-top_limit)/block_size)*block_size);
+        im_dst = im_src(bound);
     }
 }
 
@@ -116,7 +181,7 @@ void originalImage(cv::Mat& source) {
     return;
 }
 
-Mat im_src, im_gray, im_segmented, im_output, im_thinned;
+Mat im_src, im_gray, im_segmented, im_output, im_thinned, im_normalized;
 vector<Point> bifur;
 vector<int> bifur_eucli;
 
@@ -133,73 +198,11 @@ int main(int argc, char** argv)
 
     cvtColor(im_src, im_gray, CV_BGR2GRAY);
 
-    //--------------Image Segmentation
-    int left_limit = im_gray.cols, right_limit = 0, top_limit = im_gray.rows, bottom_limit = 0;
+    Fingerprint::segmentate(im_gray, im_segmented, 8);
+    Fingerprint::normalize(im_segmented, im_normalized, 8, 100);
 
-    int segmentation_block_size = 32;
-    for (int i = 0; i < im_gray.cols - segmentation_block_size; i = i + segmentation_block_size)
-    {
-        for (int j = 0; j < im_gray.rows - segmentation_block_size; j = j + segmentation_block_size)
-        {
-            double mean_val = 0;
-            for (int _i = 0; _i < segmentation_block_size; _i++)
-            {
-                for (int _j = 0; _j < segmentation_block_size; _j++)
-                {
-                    mean_val = mean_val + im_gray.at<uchar>(Point(i + _i, j + _j));
-                }
-            }
-            mean_val = mean_val/pow(segmentation_block_size, 2);
-
-            double sub_var = 0;
-            for (int _i = 0; _i < segmentation_block_size; _i++)
-            {
-                for (int _j = 0; _j < segmentation_block_size; _j++)
-                {
-                    sub_var = sub_var + pow((im_gray.at<uchar>(Point(i + _i, j + _j)) - mean_val), 2.0);
-                }
-            }
-            sub_var = sub_var / pow(segmentation_block_size, 2.0);
-
-            for (int _i = 0; _i < segmentation_block_size; _i++)
-            {
-                for (int _j = 0; _j < segmentation_block_size; _j++)
-                {
-                    if (sub_var > 1000)
-                    {
-                        if (i+_i < left_limit) left_limit = i+_i;
-                        if (i+_i > right_limit) right_limit = i+_i;
-                        if (j+_j < top_limit) top_limit = j+_j;
-                        if (j+_j > bottom_limit) bottom_limit = j+_j;
-                    }
-                }
-            }
-        }
-    }
-    Rect bound = Rect(left_limit, top_limit, ceil((float)(right_limit-left_limit)/segmentation_block_size)*segmentation_block_size,ceil((float)(bottom_limit-top_limit)/segmentation_block_size)*segmentation_block_size);
-    im_segmented = im_gray(bound);
-
-    threshold(im_segmented, im_segmented, 100, 255, cv::THRESH_BINARY);
-
-    im_thinned = im_segmented.clone();
-
-    ZhangSuen::thinning(im_thinned);
-    //im_output = im_thinned.clone();
-    im_output = Mat (im_thinned.rows, im_thinned.cols, CV_8UC3, Scalar(255,255,255));
-
-    for(int i = 0; i < im_thinned.rows; i++)
-    {
-        for (int j = 0; j < im_thinned.cols; j++)
-        {
-            if (im_thinned.at<uchar>(i, j) == 255)
-            {
-                im_output.at<Vec3b>(i, j)[0] = 0;
-                im_output.at<Vec3b>(i, j)[1] = 0;
-                im_output.at<Vec3b>(i, j)[2] = 0;
-            }
-            im_thinned.at<uchar>(i, j) = 255 - im_thinned.at<uchar>(i, j);
-        }
-    }
+    im_thinned = im_normalized.clone();
+    Fingerprint::thinning(im_thinned, im_output);
 
     int j = im_thinned.rows/2;
 
@@ -238,14 +241,14 @@ int main(int argc, char** argv)
                 switch (sum)
                 {
                     case 5:
-                        printf("bifurcation at = x:%d y:%d [p1:%d p2:%d p3:%d p4:%d p5:%d p6:%d p7:%d p8:%d]\n",j,i,p1,p2,p3,p4,p5,p6,p7,p8);
+                        //printf("bifurcation at = x:%d y:%d [p1:%d p2:%d p3:%d p4:%d p5:%d p6:%d p7:%d p8:%d]\n",j,i,p1,p2,p3,p4,p5,p6,p7,p8);
                         circle(im_output, Point(j,i),3,Scalar(0,0,255),1,8,0);
                         bifur.push_back(Point(j,i));
                         total++;
                         break;
 
                     case 7:
-                        printf("termination at = x:%d y:%d [p1:%d p2:%d p3:%d p4:%d p5:%d p6:%d p7:%d p8:%d]\n",j,i,p1,p2,p3,p4,p5,p6,p7,p8);
+                        //printf("termination at = x:%d y:%d [p1:%d p2:%d p3:%d p4:%d p5:%d p6:%d p7:%d p8:%d]\n",j,i,p1,p2,p3,p4,p5,p6,p7,p8);
                         circle(im_output, Point(j,i),3,Scalar(255,0,0),1,8,0);
                         termin.push_back(Point(j,i));
                         total++;
@@ -276,8 +279,8 @@ int main(int argc, char** argv)
 
         if (sum < min) { min = sum; cpoint=bifur[i]; }
     }
-    printf("total:%d\n",total);
-    printf("center point, x:%d y:%d \n",cpoint.x,cpoint.y);
+    //printf("total:%d\n",total);
+    //printf("center point, x:%d y:%d \n",cpoint.x,cpoint.y);
     circle(im_output, cpoint, 4, Scalar(0,255,0),2,8,0);
 
 // Cari jarak masing minutiae terminator ke titik pusat
@@ -297,7 +300,7 @@ int main(int argc, char** argv)
     }
 
 //write to file
-    ofstream database ("./data.txt");
+    ofstream database ("data.txt");
     if (database.is_open())
     {
         database << termin.size() << "," << bifur.size() << "," << cpoint << "\n";
@@ -312,12 +315,14 @@ int main(int argc, char** argv)
         imshow("segmented", im_segmented);
         imshow("out", im_output);
         imshow("thinned", im_thinned);
+        imshow("normalized", im_normalized);
         setMouseCallback("source",callback,0);
 
         waitKey(0);
 
         return 0;
     }
+    waitKey(0);
 }
 
 
